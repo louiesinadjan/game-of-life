@@ -59,7 +59,7 @@ func calculateNextState(world [][]byte, width int, height int, startRow int, end
 				} else { // Cell survives if it has 2 or 3 neighbours.
 					nextState[i-startRow][j] = 255
 				}
-			} else {          // If the cell is dead.
+			} else { // If the cell is dead.
 				if sum == 3 { // Reproduction occurs if exactly 3 neighbours are alive.
 					nextState[i-startRow][j] = 255
 				} else { // Cell remains dead.
