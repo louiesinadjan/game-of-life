@@ -10,50 +10,56 @@ import (
 	"uk.ac.bris.cs/gameoflife/util"
 )
 
-type distributorChannels struct { //passed in as a pointer as mutexes can not be passed by value
-	events     chan<- Event
-	ioCommand  chan<- ioCommand
-	ioIdle     <-chan bool
-	ioFilename chan<- string
-	ioOutput   chan<- uint8
-	ioInput    <-chan uint8
-	keyPresses <-chan rune
-	mu         sync.Mutex
+// distributorChannels struct holds various channels used for communication between goroutines.
+// It is passed as a pointer because mutexes cannot be passed by value.
+type distributorChannels struct {
+	events     chan<- Event     // Channel to send events to the main event loop.
+	ioCommand  chan<- ioCommand // Channel to send commands to the IO goroutine.
+	ioIdle     <-chan bool      // Channel to receive idle status from the IO goroutine.
+	ioFilename chan<- string    // Channel to send filenames to the IO goroutine.
+	ioOutput   chan<- uint8     // Channel to send output data to the IO goroutine.
+	ioInput    <-chan uint8     // Channel to receive input data from the IO goroutine.
+	keyPresses <-chan rune      // Channel to receive key presses.
+	mu         sync.Mutex       // Mutex to protect shared resources.
 }
 
-type race struct { //struct which lets the go routine access different variables to avoid data races
-	turn   int
-	client *rpc.Client
-	mu     sync.Mutex
+// race struct allows goroutines to access shared variables safely, avoiding data races.
+type race struct {
+	turn   int         // Current turn number.
+	client *rpc.Client // RPC client to communicate with the server.
+	mu     sync.Mutex  // Mutex to protect shared resources.
 }
 
 // distributor divides the work between workers and interacts with other goroutines.
 func distributor(p Params, c *distributorChannels) {
 
+	// Send command to read input.
 	c.ioCommand <- ioInput
+	// Send the filename to read, formatted as "widthxheight".
 	c.ioFilename <- fmt.Sprintf("%d%s%d", p.ImageWidth, "x", p.ImageHeight)
 
-	// TODO: Create a 2D slice to store the world.
+	// Create a 2D slice to store the world.
 	world := make([][]uint8, p.ImageHeight)
 	for i := range world {
 		world[i] = make([]uint8, p.ImageWidth)
 		for j := 0; j < p.ImageWidth; j++ {
+			// Read initial cell states from ioInput channel.
 			world[i][j] = <-c.ioInput
 		}
 	}
 
-	//  connect to the server via RPC
-	client, err := rpc.Dial("tcp", "127.0.0.1:8030") // replace "127.0.0.1:8030" with your server's IP and port
+	// Connect to the server via RPC.
+	client, err := rpc.Dial("tcp", "127.0.0.1:8030") // Replace with your server's IP and port.
 	if err != nil {
 		log.Fatal("Error connecting to server:", err)
 	}
 
 	empty := stubs.Empty{}
 	continueResponse := &stubs.GetContinueResponse{}
+	// Call RPC method to check if there is a saved state to continue from.
 	err = client.Call(stubs.GetContinueHandler, empty, continueResponse)
 
-	//FAULT TOLERANCE
-	//if the server has been quit before, assign the world to be the world stored in the broker
+	// Fault tolerance: if the server has been quit before, assign the world to be the world stored in the broker.
 	if continueResponse.Continue {
 		world = continueResponse.World
 		fmt.Printf("Continuing From Turn %d\n", continueResponse.Turn)
@@ -69,10 +75,10 @@ func distributor(p Params, c *distributorChannels) {
 	}
 
 	var turn int
-	//struct to let the goroutine access different variables to the rest of the function code
+	// Create a race struct to allow the goroutine to access shared variables safely.
 	r := race{turn: turn, client: client}
 
-	//request to make to server for evolving the world
+	// Prepare request to send to server for evolving the world.
 	evolveRequest := stubs.EvolveWorldRequest{
 		World:       world,
 		Width:       p.ImageWidth,
@@ -84,122 +90,125 @@ func distributor(p Params, c *distributorChannels) {
 	}
 	evolveResponse := &stubs.EvolveResponse{}
 
-	//let goWorld be a different world variable that the goroutine can access to avoid data races
+	// Create a separate world variable for the goroutine to avoid data races.
 	goWorld := world
 	done := false
-	//goroutine that handles sdl live view, alive cells count and key presses
+	// Goroutine that handles SDL live view, alive cells count, and key presses.
 	go func() {
-		ticker := time.NewTicker(2 * time.Second)       //ticker for alive cell count
-		tickSDL := time.NewTicker(1 * time.Millisecond) //ticker for sdl live view
-		goDone := done                                  //to avoid sending on a closed channel
+		ticker := time.NewTicker(2 * time.Second)       // Ticker for alive cell count (every 2 seconds).
+		tickSDL := time.NewTicker(5 * time.Millisecond) // Ticker for SDL live view updates.
+		goDone := done                                  // Local copy to avoid sending on a closed channel.
 		defer ticker.Stop()
 		defer tickSDL.Stop()
-		for { //indefinitely loops until a return statement in either 'q' or 'k' key press or 'if goDone == true' at the start
+		for {
 			empty := stubs.Empty{}
 			if goDone {
 				return
 			}
 			select {
-			//if a tick is received from the tickSDL channel then update SDL view
-			case <-tickSDL.C: //SDL LIVE VIEW
-				//lock the DistributorChannels while CellFlipped events and TurnComplete event is inputted
+			// If a tick is received from the tickSDL channel, update SDL view.
+			case <-tickSDL.C: // SDL Live View.
+				// Lock the DistributorChannels mutex while sending events.
 				c.mu.Lock()
 				cellFlippedResponse := &stubs.GetBrokerCellFlippedResponse{}
-				//get the array of structs that represent cell flipped events from broker
+				// Get the array of cell flipped events from the broker via RPC.
 				err = client.Call(stubs.GetBrokerCellFlippedHandler, empty, cellFlippedResponse)
 				cellUpdates := cellFlippedResponse.FlippedEvents
 				if len(cellUpdates) != 0 {
-					for i := range cellUpdates { //iterate through the array and send each event into events channel
-						if !done { //further validation to see if channel is closed
+					for i := range cellUpdates {
+						if !done { // Further validation to check if channel is closed.
+							// Send CellFlipped events to the events channel.
 							c.events <- CellFlipped{cellUpdates[i].CompletedTurns, cellUpdates[i].Cell}
 						}
 					}
-					//after sending all CellFlipped events for the turn, send a TurnComplete event
-					if !done { //check if channel is closed
+					// After sending all CellFlipped events for the turn, send a TurnComplete event.
+					if !done { // Check if channel is closed.
 						c.events <- TurnComplete{CompletedTurns: cellUpdates[0].CompletedTurns}
 					}
 				}
-				c.mu.Unlock() //unlock DistributorChannels mutex
-			//if a tick is received from the ticker channel then output AliveCellsCount
+				c.mu.Unlock() // Unlock the DistributorChannels mutex.
+			// If a tick is received from the ticker channel, output AliveCellsCount.
 			case <-ticker.C:
-				c.mu.Lock() //lock DistributorChannels
+				c.mu.Lock() // Lock DistributorChannels mutex.
 				aliveCellsCountResponse := &stubs.AliveCellsCountResponse{}
-				//RPC to alive cells function in broker
+				// RPC call to get alive cells count from the broker.
 				err = client.Call(stubs.AliveCellsCountHandler, empty, aliveCellsCountResponse)
 				if err != nil {
 					log.Fatal("call error : ", err)
 					return
 				}
-				//get responses from RPC
+				// Get responses from RPC.
 				numberAliveCells := aliveCellsCountResponse.AliveCellsCount
 				r.turn = aliveCellsCountResponse.CompletedTurns
-				if !done { //check if channel is closed
-					//send AliveCellsCount event with responses
+				if !done { // Check if channel is closed.
+					// Send AliveCellsCount event with responses.
 					c.events <- AliveCellsCount{r.turn, numberAliveCells}
 				}
-				c.mu.Unlock() //unlock DistributorChannels
-				// check for keypress events
+				c.mu.Unlock() // Unlock DistributorChannels mutex.
+			// Check for keypress events.
 			case command := <-c.keyPresses:
-				// react based on the keypress command
+				// React based on the keypress command.
 				empty := stubs.Empty{}
 				emptyResponse := &stubs.Empty{}
 				getGlobal := &stubs.GetGlobalResponse{}
-				//RPC call to get the current world and turn on the broker
+				// RPC call to get the current world and turn from the broker.
 				err = client.Call(stubs.GetGlobalHandler, empty, getGlobal)
 				if err != nil {
 					log.Fatal("call error : ", err)
 					return
 				}
+				// Update local variables with responses.
 				goWorld = getGlobal.World
 				r.turn = getGlobal.Turns
-				//assign the local goroutine variables to response
 
 				switch command {
-				case 's': // 's' key is pressed
-					// StateChange event to indicate execution and save a PGM image
+				case 's': // 's' key is pressed.
+					// StateChange event to indicate execution and save a PGM image.
 					c.mu.Lock()
 					c.events <- StateChange{r.turn, Executing}
 					c.mu.Unlock()
-					savePGMImage(c, goWorld, p) // Function to save the current state as a PGM image
+					savePGMImage(c, goWorld, p) // Function to save the current state as a PGM image.
 
-				case 'q': // 'q' key is pressed
-					// StateChange event to indicate quitting and save a PGM image
+				case 'q': // 'q' key is pressed.
+					// StateChange event to indicate quitting and save a PGM image.
 					err = client.Call(stubs.QuitHandler, empty, emptyResponse)
 					c.mu.Lock()
 					c.events <- StateChange{r.turn, Quitting}
 					c.mu.Unlock()
-					savePGMImage(c, goWorld, p) // function to save the current state as a PGM image
-					close(c.events)             // close the events channel
-					done = true                 // update boolean to know that channel is closed
-					return                      // exit goroutine
+					savePGMImage(c, goWorld, p) // Function to save the current state as a PGM image.
+					close(c.events)             // Close the events channel.
+					done = true                 // Update boolean to know that channel is closed.
+					return                      // Exit goroutine.
 
-				case 'k': // 'q' key is pressed
+				case 'k': // 'k' key is pressed.
+					// RPC call to kill the server.
 					err = client.Call(stubs.KillServerHandler, empty, emptyResponse)
 					c.mu.Lock()
-					// StateChange event to indicate quitting and save a PGM image
+					// StateChange event to indicate quitting and save a PGM image.
 					c.events <- StateChange{r.turn, Quitting}
 					c.mu.Unlock()
-					savePGMImage(c, goWorld, p) // function to save the current state as a PGM image
-					close(c.events)             // close the events channel
-					done = true                 // update boolean to know that channel is closed
-					return                      // exit goroutine
+					savePGMImage(c, goWorld, p) // Function to save the current state as a PGM image.
+					close(c.events)             // Close the events channel.
+					done = true                 // Update boolean to know that channel is closed.
+					return                      // Exit goroutine.
 
-				case 'p': // 'p' key is pressed
+				case 'p': // 'p' key is pressed.
+					// Pause the simulation.
 					c.events <- StateChange{r.turn, Paused}
-					//locks the broker mutex so nothing can be changed or accessed during pause
+					// Lock the broker mutex so nothing can be changed or accessed during pause.
 					err = client.Call(stubs.PauseHandler, empty, emptyResponse)
 					fmt.Printf("Current turn %d being processed\n", r.turn)
-					for { //enter an infinite for loop which only breaks after 'p' is presses again
-						if <-c.keyPresses == 'p' { //waits for another 'p' key press
-							//unlocks mutex
+					for { // Enter an infinite loop which only breaks after 'p' is pressed again.
+						if <-c.keyPresses == 'p' { // Waits for another 'p' key press.
+							// Unlock broker mutex.
 							err = client.Call(stubs.UnpauseHandler, empty, emptyResponse)
 							break
 						}
 					}
-					// StateChange event to indicate execution after pausing
+					// StateChange event to indicate execution after pausing.
 					c.events <- StateChange{r.turn, Executing}
 				}
-			default: // no events
+			default: // No events.
 				if r.turn == p.Turns {
 					return
 				}
@@ -207,51 +216,53 @@ func distributor(p Params, c *distributorChannels) {
 		}
 	}()
 
-	//make RPC to start iterating each turn and evolving the world
+	// Make RPC to start iterating each turn and evolving the world.
 	err = client.Call(stubs.EvolveWorldHandler, evolveRequest, evolveResponse)
 	if err != nil {
 		log.Fatal("call error : ", err)
 	}
+	// Update world and turn with the response from the server.
 	world = evolveResponse.World
 	turn = evolveResponse.Turn
 
-	//assign variables to the final world and turn response
+	// Prepare request to calculate alive cells for the final turn.
 	aliveCellsRequest := stubs.CalculateAliveCellsRequest{
 		World: world,
 	}
 	aliveCellsResponse := &stubs.CalculateAliveCellsResponse{}
 
-	//retrieve alive cells for the FinalTurnComplete event
+	// Retrieve alive cells for the FinalTurnComplete event.
 	err = client.Call(stubs.AliveCellsHandler, aliveCellsRequest, aliveCellsResponse)
 	if err != nil {
 		log.Fatal("call error : ", err)
 	}
 	aliveCells := aliveCellsResponse.AliveCells
 
-	// TODO: Report the final state using FinalTurnCompleteEvent.
+	// Report the final state using FinalTurnCompleteEvent.
 	c.events <- FinalTurnComplete{turn, aliveCells}
-	savePGMImage(c, world, p) //save the final world
+	savePGMImage(c, world, p) // Save the final world.
 
-	// make sure that the Io has finished any output before exiting.
+	// Make sure that the IO has finished any output before exiting.
 	c.ioCommand <- ioCheckIdle
 	<-c.ioIdle
 
-	//send quitting StateChange event
+	// Send Quitting StateChange event.
 	c.events <- StateChange{turn, Quitting}
 
-	// close the channel to stop the SDL goroutine gracefully. Removing may cause deadlock.
+	// Close the events channel to stop the SDL goroutine gracefully.
 	close(c.events)
-	done = true //update boolean to know channel is closed
+	done = true // Update boolean to indicate channel is closed.
 
 }
 
+// savePGMImage saves the current world state as a PGM image.
 func savePGMImage(c *distributorChannels, world [][]byte, p Params) {
 	c.ioCommand <- ioOutput
 	c.ioFilename <- fmt.Sprintf("%dx%dx%d", p.ImageWidth, p.ImageHeight, p.Turns)
-	// Iterate over the world and send each cell's value to the ioOutput channel for writing the PGM image
+	// Iterate over the world and send each cell's value to the ioOutput channel for writing the PGM image.
 	for i := range world {
 		for j := range world[i] {
-			c.ioOutput <- world[i][j] // Send the current cell value to the output channel
+			c.ioOutput <- world[i][j] // Send the current cell value to the output channel.
 		}
 	}
 }

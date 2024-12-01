@@ -4,7 +4,6 @@ import (
 	"flag"
 	"fmt"
 	"runtime"
-
 	"uk.ac.bris.cs/gameoflife/gol"
 	"uk.ac.bris.cs/gameoflife/sdl"
 )
@@ -12,6 +11,10 @@ import (
 // main is the function called when starting Game of Life with 'go run .'
 func main() {
 	runtime.LockOSThread()
+
+	// Set the maximum number of CPU cores to be used by the Go runtime.
+	runtime.GOMAXPROCS(8)
+
 	var params gol.Params
 
 	flag.IntVar(
