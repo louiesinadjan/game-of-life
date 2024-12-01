@@ -2,7 +2,7 @@
 
 # Bash script to spin up a specified number of workers for the Game of Life application.
 
-# Usage: ./start_workers.sh <number_of_workers>
+# Usage: ./start_workers.sh <number of workers>
 
 # Check if the number of workers is provided as an argument
 if [ $# -ne 1 ]; then
