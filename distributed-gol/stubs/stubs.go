@@ -2,17 +2,17 @@ package stubs
 
 import "uk.ac.bris.cs/gameoflife/util"
 
-var EvolveWorldHandler = "GOLWorker.EvolveWorld"
-var AliveCellsCountHandler = "GOLWorker.AliveCellsCount"
-var AliveCellsHandler = "GOLWorker.CalculateAliveCells"
-var GetGlobalHandler = "GOLWorker.GetGlobal"
-var PauseHandler = "GOLWorker.Pause"
-var UnpauseHandler = "GOLWorker.Unpause"
-var QuitHandler = "GOLWorker.QuitServer"
-var KillServerHandler = "GOLWorker.KillServer"
-var GetBrokerCellFlippedHandler = "GOLWorker.GetCellFlipped"
-var GetTurnDoneHandler = "GOLWorker.GetTurnDone"
-var GetContinueHandler = "GOLWorker.GetContinue"
+var EvolveWorldHandler = "Broker.EvolveWorld"
+var AliveCellsCountHandler = "Broker.AliveCellsCount"
+var AliveCellsHandler = "Broker.CalculateAliveCells"
+var GetGlobalHandler = "Broker.GetGlobal"
+var PauseHandler = "Broker.Pause"
+var UnpauseHandler = "Broker.Unpause"
+var QuitHandler = "Broker.QuitServer"
+var KillServerHandler = "Broker.KillServer"
+var GetBrokerCellFlippedHandler = "Broker.GetCellFlipped"
+var GetTurnDoneHandler = "Broker.GetTurnDone"
+var GetContinueHandler = "Broker.GetContinue"
 
 type EvolveResponse struct {
 	World [][]byte

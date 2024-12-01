@@ -17,9 +17,9 @@ import (
 // Global kill channel used to signal the broker to quit.
 var kill = make(chan bool)
 
-// GOLWorker struct represents the broker in the distributed Game of Life simulation.
+// Broker struct represents the broker in the distributed Game of Life simulation.
 // It holds the current state of the world, the list of connected workers, and synchronisation primitives.
-type GOLWorker struct {
+type Broker struct {
 	LastWorld     [][]byte             // Previous state of the world, used for detecting changes.
 	World         [][]byte             // Current state of the world.
 	Turn          int                  // Current turn number.
@@ -130,21 +130,21 @@ func worldSize(world [][]byte) {
 }
 
 // EvolveWorld handles the evolution of the world by distributing work to connected workers.
-func (g *GOLWorker) EvolveWorld(req stubs.EvolveWorldRequest, res *stubs.EvolveResponse) (err error) {
-	g.Quit = false // Reset the quit flag at the start of a new simulation run.
+func (b *Broker) EvolveWorld(req stubs.EvolveWorldRequest, res *stubs.EvolveResponse) (err error) {
+	b.Quit = false // Reset the quit flag at the start of a new simulation run.
 
 	// Fault tolerance: If not continuing from a saved state, initialise the world from the request.
-	if !g.Continue {
-		g.World = make([][]byte, len(req.World))
+	if !b.Continue {
+		b.World = make([][]byte, len(req.World))
 		for i := range req.World {
-			g.World[i] = make([]byte, len(req.World[i]))
-			copy(g.World[i], req.World[i])
+			b.World[i] = make([]byte, len(req.World[i]))
+			copy(b.World[i], req.World[i])
 		}
-		g.Turn = 0
+		b.Turn = 0
 	}
 
 	// For SDL live view and fault tolerance, set LastWorld to the current world.
-	g.LastWorld = g.World
+	b.LastWorld = b.World
 	//this is because this implementation compares the current SDL displayed world and next displayed world
 
 	// Extract parameters from the request.
@@ -156,17 +156,17 @@ func (g *GOLWorker) EvolveWorld(req stubs.EvolveWorldRequest, res *stubs.EvolveR
 	}
 
 	// Execute the Game of Life simulation for the specified number of turns.
-	for g.Turn < p.Turns && !g.Quit {
-		g.Mu.Lock() // Lock the mutex to prevent concurrent access to global variables.
+	for b.Turn < p.Turns && !b.Quit {
+		b.Mu.Lock() // Lock the mutex to prevent concurrent access to global variables.
 
 		var newWorld [][]byte                     // New world state after this turn.
-		threads := len(g.Workers)                 // Number of available workers.
+		threads := len(b.Workers)                 // Number of available workers.
 		results := make([]chan [][]byte, threads) // Channels to receive results from workers.
 
 		// Distribute work to each worker.
-		for id, workerClient := range g.Workers {
+		for id, workerClient := range b.Workers {
 			results[id] = make(chan [][]byte)
-			go worker(id, g.World, results[id], p, workerClient, threads) // Concurrent call to each worker.
+			go worker(id, b.World, results[id], p, workerClient, threads) // Concurrent call to each worker.
 		}
 
 		// Collect results from workers and assemble the new world state.
@@ -175,27 +175,27 @@ func (g *GOLWorker) EvolveWorld(req stubs.EvolveWorldRequest, res *stubs.EvolveR
 			newWorld = append(newWorld, slice...)
 		}
 
-		g.World = newWorld // Update the global world state.
-		g.Turn++           // Increment the turn counter.
-		g.TurnDone = true  // Indicate that a turn has been completed.
-		g.Mu.Unlock()      // Unlock the mutex.
+		b.World = newWorld // Update the global world state.
+		b.Turn++           // Increment the turn counter.
+		b.TurnDone = true  // Indicate that a turn has been completed.
+		b.Mu.Unlock()      // Unlock the mutex.
 	}
 
 	// Prepare the response with the final world state and turn number.
-	res.World = g.World
-	res.Turn = g.Turn
+	res.World = b.World
+	res.Turn = b.Turn
 	return
 }
 
 // CalculateAliveCells calculates the positions of all alive cells in the current world.
-func (g *GOLWorker) CalculateAliveCells(req stubs.Empty, res *stubs.CalculateAliveCellsResponse) (err error) {
-	g.Mu.Lock()
-	defer g.Mu.Unlock()
+func (b *Broker) CalculateAliveCells(req stubs.Empty, res *stubs.CalculateAliveCellsResponse) (err error) {
+	b.Mu.Lock()
+	defer b.Mu.Unlock()
 
 	aliveCells := []util.Cell{}
-	for i := range g.World { // Iterate over each row.
-		for j := range g.World[i] { // Iterate over each cell in the row.
-			if g.World[i][j] == 255 { // Check if the cell is alive.
+	for i := range b.World { // Iterate over each row.
+		for j := range b.World[i] { // Iterate over each cell in the row.
+			if b.World[i][j] == 255 { // Check if the cell is alive.
 				aliveCells = append(aliveCells, util.Cell{X: j, Y: i})
 			}
 		}
@@ -206,14 +206,14 @@ func (g *GOLWorker) CalculateAliveCells(req stubs.Empty, res *stubs.CalculateAli
 }
 
 // AliveCellsCount returns the number of alive cells and the current turn number.
-func (g *GOLWorker) AliveCellsCount(req stubs.Empty, res *stubs.AliveCellsCountResponse) (err error) {
-	g.Mu.Lock()
-	defer g.Mu.Unlock()
+func (b *Broker) AliveCellsCount(req stubs.Empty, res *stubs.AliveCellsCountResponse) (err error) {
+	b.Mu.Lock()
+	defer b.Mu.Unlock()
 
 	count := 0
-	for i := range g.World {
-		for j := range g.World[i] {
-			if g.World[i][j] == 255 {
+	for i := range b.World {
+		for j := range b.World[i] {
+			if b.World[i][j] == 255 {
 				count++
 			}
 		}
@@ -221,94 +221,94 @@ func (g *GOLWorker) AliveCellsCount(req stubs.Empty, res *stubs.AliveCellsCountR
 
 	// Populate the response with the alive cells count and completed turns.
 	res.AliveCellsCount = count
-	res.CompletedTurns = g.Turn
+	res.CompletedTurns = b.Turn
 	return
 }
 
 // GetGlobal returns the current world state and turn number.
-func (g *GOLWorker) GetGlobal(req stubs.Empty, res *stubs.GetGlobalResponse) (err error) {
-	g.Mu.Lock()
-	defer g.Mu.Unlock()
-	res.World = g.World
-	res.Turns = g.Turn
+func (b *Broker) GetGlobal(req stubs.Empty, res *stubs.GetGlobalResponse) (err error) {
+	b.Mu.Lock()
+	defer b.Mu.Unlock()
+	res.World = b.World
+	res.Turns = b.Turn
 	return
 }
 
 // QuitServer sets the flags to indicate that the simulation should quit and saves the current world state.
-func (g *GOLWorker) QuitServer(req stubs.Empty, res *stubs.Empty) (err error) {
-	g.Mu.Lock()
-	defer g.Mu.Unlock()
-	g.Continue = true     // Enable fault tolerance to continue from this state.
-	g.Quit = true         // Set the quit flag to stop the simulation.
-	g.LastWorld = g.World // Save the current world state.
+func (b *Broker) QuitServer(req stubs.Empty, res *stubs.Empty) (err error) {
+	b.Mu.Lock()
+	defer b.Mu.Unlock()
+	b.Continue = true     // Enable fault tolerance to continue from this state.
+	b.Quit = true         // Set the quit flag to stop the simulation.
+	b.LastWorld = b.World // Save the current world state.
 	return
 }
 
 // Pause locks the mutex to pause the simulation by preventing access to global variables.
-func (g *GOLWorker) Pause(req stubs.Empty, res *stubs.Empty) (err error) {
-	g.Mu.Lock()
+func (b *Broker) Pause(req stubs.Empty, res *stubs.Empty) (err error) {
+	b.Mu.Lock()
 	return
 }
 
 // Unpause unlocks the mutex to resume the simulation.
-func (g *GOLWorker) Unpause(req stubs.Empty, res *stubs.Empty) (err error) {
-	g.Mu.Unlock()
+func (b *Broker) Unpause(req stubs.Empty, res *stubs.Empty) (err error) {
+	b.Mu.Unlock()
 	return
 }
 
 // KillServer terminates the simulation and signals connected workers to shut down.
-func (g *GOLWorker) KillServer(req stubs.Empty, res *stubs.Empty) (err error) {
+func (b *Broker) KillServer(req stubs.Empty, res *stubs.Empty) (err error) {
 	// Prepare an empty response for the RPC calls.
 	emptyRes := stubs.Empty{}
 
 	// Notify each worker to shut down and close the client connections.
-	for _, client := range g.Workers {
+	for _, client := range b.Workers {
 		err = client.Call(stubs.KillHandler, req, &emptyRes)
 		client.Close()
 	}
 
-	g.Quit = true // Set the quit flag.
+	b.Quit = true // Set the quit flag.
 	kill <- true  // Signal the kill channel to exit the program.
 	return
 }
 
 // GetTurnDone returns TurnDone (SDL live view), and the current turn, sets TurnDone back to false
-func (g *GOLWorker) GetTurnDone(req stubs.Empty, res *stubs.GetTurnDoneResponse) (err error) {
-	g.Mu.Lock()
-	defer g.Mu.Unlock()
-	res.TurnDone = g.TurnDone
-	res.Turn = g.Turn
-	g.TurnDone = false
+func (b *Broker) GetTurnDone(req stubs.Empty, res *stubs.GetTurnDoneResponse) (err error) {
+	b.Mu.Lock()
+	defer b.Mu.Unlock()
+	res.TurnDone = b.TurnDone
+	res.Turn = b.Turn
+	b.TurnDone = false
 	return
 }
 
 // GetContinue returns the current world state, turn number, and fault tolerance flag.
-func (g *GOLWorker) GetContinue(req stubs.Empty, res *stubs.GetContinueResponse) (err error) {
-	g.Mu.Lock()
-	defer g.Mu.Unlock()
-	res.World = g.World
-	res.Turn = g.Turn
-	res.Continue = g.Continue
+func (b *Broker) GetContinue(req stubs.Empty, res *stubs.GetContinueResponse) (err error) {
+	b.Mu.Lock()
+	defer b.Mu.Unlock()
+	res.World = b.World
+	res.Turn = b.Turn
+	res.Continue = b.Continue
 	return
 }
 
 // GetCellFlipped function returns a struct array which contains variables required for CellFlipped events.
-func (g *GOLWorker) GetCellFlipped(req stubs.Empty, res *stubs.GetBrokerCellFlippedResponse) (err error) {
-	g.Mu.Lock()
-	defer g.Mu.Unlock()
+func (b *Broker) GetCellFlipped(req stubs.Empty, res *stubs.GetBrokerCellFlippedResponse) (err error) {
+	b.Mu.Lock()
+	defer b.Mu.Unlock()
 
-	g.FlippedEvents = []stubs.FlippedEvent{} // Reset the list of flipped events.
+	b.FlippedEvents = []stubs.FlippedEvent{} // Reset the list of flipped events.
 	// Find all cells that have changed state between LastWorld and the current World.
-	for _, cell := range findFlippedCells(g.World, g.LastWorld) {
+	for _, cell := range findFlippedCells(b.World, b.LastWorld) {
 		flippedEvent := stubs.FlippedEvent{
-			CompletedTurns: g.Turn,
+			CompletedTurns: b.Turn,
 			Cell:           cell,
 		}
-		g.FlippedEvents = append(g.FlippedEvents, flippedEvent)
+		b.FlippedEvents = append(b.FlippedEvents, flippedEvent)
 	}
 
-	g.LastWorld = g.World               // Update LastWorld for the next comparison.
-	res.FlippedEvents = g.FlippedEvents // Return the list of flipped events.
+	b.LastWorld = b.World               // Update LastWorld for the next comparison.
+	res.FlippedEvents = b.FlippedEvents // Return the list of flipped events.
 	return
 }
 
@@ -381,8 +381,8 @@ func main() {
 
 	workers := ScanForWorkers(*startPort, *endPort)
 
-	// Register the GOLWorker type with the RPC server.
-	rpc.Register(&GOLWorker{Workers: workers, Continue: false})
+	// Register the Broker type with the RPC server.
+	rpc.Register(&Broker{Workers: workers, Continue: false})
 
 	// Start listening for incoming RPC connections.
 	listener, err := net.Listen("tcp", ":"+*pAddr)
