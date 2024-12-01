@@ -13,7 +13,7 @@ func main() {
 	runtime.LockOSThread()
 
 	// Set the maximum number of CPU cores to be used by the Go runtime.
-	runtime.GOMAXPROCS(8)
+	runtime.GOMAXPROCS(16)
 
 	var params gol.Params
 
