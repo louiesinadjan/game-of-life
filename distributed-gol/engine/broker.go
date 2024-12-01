@@ -62,6 +62,22 @@ func ReadFileLines(filePath string) []string {
 	return lines
 }
 
+// ScanForWorkers scans a range of ports to discover active workers.
+func ScanForWorkers(startPort, endPort int) []*rpc.Client {
+	var workers []*rpc.Client
+	for port := startPort; port <= endPort; port++ {
+		address := fmt.Sprintf("localhost:%d", port)
+		client, err := rpc.Dial("tcp", address)
+		if err == nil {
+			workers = append(workers, client)
+			fmt.Printf("Connected to worker on %s\n", address)
+		} else {
+			fmt.Printf("Failed to connect to worker on %s: %v\n", address, err)
+		}
+	}
+	return workers
+}
+
 // worker function sends a portion of the world to a worker client for processing.
 func worker(id int, world [][]byte, results chan<- [][]byte, p gol.Params, client *rpc.Client, threads int) {
 	// Calculate the number of rows each worker should process.
@@ -338,6 +354,8 @@ func xor2D(a, b [][]byte) [][]byte {
 // main function initialises the broker, sets up RPC connections, and listens for incoming requests.
 func main() {
 	pAddr := flag.String("port", "8030", "Port to listen on")
+	startPort := flag.Int("startPort", 8040, "Starting port for worker scanning")
+	endPort := flag.Int("endPort", 8050, "Ending port for worker scanning")
 	flag.Parse()
 
 	// Goroutine to handle the kill signal and exit the program.
@@ -350,15 +368,18 @@ func main() {
 	}()
 
 	// Set up client connections to workers.
-	var workers []*rpc.Client
-	workerPorts := ReadFileLines("workers.txt") // Read worker addresses from a file.
-	for _, detail := range workerPorts {
-		client, err := rpc.Dial("tcp", detail)
-		if err == nil {
-			workers = append(workers, client)
-			fmt.Printf("Worker connected on: %v\n", detail)
-		}
-	}
+
+	//var workers []*rpc.Client
+	//workerPorts := ReadFileLines("workers.txt") // Read worker addresses from a file.
+	//for _, detail := range workerPorts {
+	//	client, err := rpc.Dial("tcp", detail)
+	//	if err == nil {
+	//		workers = append(workers, client)
+	//		fmt.Printf("Worker connected on: %v\n", detail)
+	//	}
+	//}
+
+	workers := ScanForWorkers(*startPort, *endPort)
 
 	// Register the GOLWorker type with the RPC server.
 	rpc.Register(&GOLWorker{Workers: workers, Continue: false})

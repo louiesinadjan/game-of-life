@@ -16,13 +16,15 @@ NUM_WORKERS=$1
 # Base port number
 BASE_PORT=8040
 
+# Path to the worker directory
+WORKER_PATH="/Users/louiesinadjan/Documents/game-of-life/game-of-life/distributed-gol/worker"
+
 # Loop to start the workers
 for ((i = 0; i < NUM_WORKERS; i++)); do
     PORT=$((BASE_PORT + i))
     echo "Starting worker on port $PORT..."
-    # Open a new terminal for each worker
-    gnome-terminal -- bash -c "go run . -port=$PORT; exec bash" &
-    # Note: Replace `gnome-terminal` with your terminal application if not using GNOME.
+    # Open a new terminal for each worker and navigate to the worker directory
+    osascript -e "tell app \"Terminal\" to do script \"cd $WORKER_PATH && go run . -port=$PORT\""
 done
 
-echo "$NUM_WORKERS workers started successfully starting from port $BASE_PORT!"
+echo "$NUM_WORKERS workers started successfully starting from port $BASE_PORT"
