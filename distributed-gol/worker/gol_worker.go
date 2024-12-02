@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/rpc"
 	"os"
+	"sync"
 	"uk.ac.bris.cs/gameoflife/stubs"
 )
 
@@ -30,44 +31,71 @@ func (w *WorldOps) KillWorker(req *stubs.Empty, res *stubs.Empty) (err error) {
 	return
 }
 
-// calculateNextState computes the next state of the world based on the rules of Conway's Game of Life.
+// calculateNextState computes the next state of the world in parallel.
 // The computation is limited to the rows between startRow and endRow for efficiency.
 func calculateNextState(world [][]byte, width int, height int, startRow int, endRow int) [][]byte {
 	// Initialise the next state for the given slice of rows.
 	nextState := make([][]byte, endRow-startRow)
-	for i := 0; i < endRow-startRow; i++ {
+	for i := range nextState {
 		nextState[i] = make([]byte, width)
 	}
 
-	// Iterate through each cell in the specified rows and compute its next state.
-	for i := startRow; i < endRow; i++ {
-		for j := 0; j < width; j++ {
-			// Calculate the sum of the states of the 8 neighbouring cells, accounting for wrap-around edges.
-			sum := (int(world[(i+height-1)%height][(j+width-1)%width]) +
-				int(world[(i+height-1)%height][(j+width)%width]) +
-				int(world[(i+height-1)%height][(j+width+1)%width]) +
-				int(world[(i+height)%height][(j+width-1)%width]) +
-				int(world[(i+height)%height][(j+width+1)%width]) +
-				int(world[(i+height+1)%height][(j+width-1)%width]) +
-				int(world[(i+height+1)%height][(j+width)%width]) +
-				int(world[(i+height+1)%height][(j+width+1)%width])) / 255
+	chunkSize := 4 // Rows per goroutine
+	numChunks := (endRow - startRow + chunkSize - 1) / chunkSize
 
-			// Update the cell state based on the rules of Conway's Game of Life.
-			if world[i][j] == 255 { // If the cell is alive.
-				if sum < 2 || sum > 3 { // Underpopulation or overpopulation causes death.
-					nextState[i-startRow][j] = 0
-				} else { // Cell survives if it has 2 or 3 neighbours.
-					nextState[i-startRow][j] = 255
-				}
-			} else { // If the cell is dead.
-				if sum == 3 { // Reproduction occurs if exactly 3 neighbours are alive.
-					nextState[i-startRow][j] = 255
-				} else { // Cell remains dead.
-					nextState[i-startRow][j] = 0
+	// Use a WaitGroup to synchronise all goroutines.
+	var wg sync.WaitGroup
+
+	// Launch goroutines to process each chunk in parallel.
+	for chunk := 0; chunk < numChunks; chunk++ {
+		// Calculate the start and end rows for this chunk.
+		chunkStart := startRow + chunk*chunkSize
+		chunkEnd := chunkStart + chunkSize
+		if chunkEnd > endRow {
+			chunkEnd = endRow // Ensure we don't exceed the slice boundary.
+		}
+
+		// Increment the WaitGroup counter for this goroutine.
+		wg.Add(1)
+
+		// Launch a goroutine to process the chunk.
+		go func(chunkStart, chunkEnd int) {
+			defer wg.Done() // Decrement the counter when the goroutine completes.
+
+			// Compute the next state for rows in this chunk.
+			for i := chunkStart; i < chunkEnd; i++ {
+				for j := 0; j < width; j++ {
+					// Calculate the sum of the states of the 8 neighbouring cells.
+					sum := (int(world[(i+height-1)%height][(j+width-1)%width]) +
+						int(world[(i+height-1)%height][(j+width)%width]) +
+						int(world[(i+height-1)%height][(j+width+1)%width]) +
+						int(world[(i+height)%height][(j+width-1)%width]) +
+						int(world[(i+height)%height][(j+width+1)%width]) +
+						int(world[(i+height+1)%height][(j+width-1)%width]) +
+						int(world[(i+height+1)%height][(j+width)%width]) +
+						int(world[(i+height+1)%height][(j+width+1)%width])) / 255
+
+					// Update the cell state based on the rules of Conway's Game of Life.
+					if world[i][j] == 255 { // If the cell is alive.
+						if sum < 2 || sum > 3 { // Underpopulation or overpopulation causes death.
+							nextState[i-startRow][j] = 0
+						} else { // Cell survives if it has 2 or 3 neighbours.
+							nextState[i-startRow][j] = 255
+						}
+					} else { // If the cell is dead.
+						if sum == 3 { // Reproduction occurs if exactly 3 neighbours are alive.
+							nextState[i-startRow][j] = 255
+						} else { // Cell remains dead.
+							nextState[i-startRow][j] = 0
+						}
+					}
 				}
 			}
-		}
+		}(chunkStart, chunkEnd)
 	}
+
+	// Wait for all goroutines to finish.
+	wg.Wait()
 
 	return nextState
 }
