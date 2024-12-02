@@ -20,14 +20,14 @@ type distributorChannels struct {
 	ioOutput   chan<- uint8     // Channel to send output data to the IO goroutine.
 	ioInput    <-chan uint8     // Channel to receive input data from the IO goroutine.
 	keyPresses <-chan rune      // Channel to receive key presses.
-	mu         sync.Mutex       // Mutex to protect shared resources.
+	mu         sync.Mutex       // Mutex to protect shared distributorChannels resources.
 }
 
 // race struct allows goroutines to access shared variables safely, avoiding data races.
 type race struct {
 	turn   int         // Current turn number.
 	client *rpc.Client // RPC client to communicate with the server.
-	mu     sync.Mutex  // Mutex to protect shared resources.
+	mu     sync.Mutex  // Mutex to protect shared race resources.
 }
 
 // distributor divides the work between workers and interacts with other goroutines.

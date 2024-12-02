@@ -14,6 +14,7 @@ func main() {
 	runtime.LockOSThread()
 	var params gol.Params
 
+	// Redundant flag in distributed implementation
 	flag.IntVar(
 		&params.Threads,
 		"t",
@@ -45,7 +46,6 @@ func main() {
 
 	flag.Parse()
 
-	fmt.Println("Threads:", params.Threads)
 	fmt.Println("Width:", params.ImageWidth)
 	fmt.Println("Height:", params.ImageHeight)
 

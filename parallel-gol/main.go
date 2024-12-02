@@ -48,7 +48,6 @@ func main() {
 
 	flag.Parse()
 
-	fmt.Println("Threads:", params.Threads)
 	fmt.Println("Width:", params.ImageWidth)
 	fmt.Println("Height:", params.ImageHeight)
 
