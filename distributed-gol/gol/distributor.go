@@ -3,6 +3,7 @@ package gol
 import (
 	"fmt"
 	"log"
+	"math/rand"
 	"net/rpc"
 	"sync"
 	"time"
@@ -31,7 +32,7 @@ type race struct {
 }
 
 // distributor divides the work between workers and interacts with other goroutines.
-func distributor(p Params, c *distributorChannels) {
+func distributor(p Params, c *distributorChannels, random bool) {
 
 	// Send command to read input.
 	c.ioCommand <- ioInput
@@ -40,11 +41,30 @@ func distributor(p Params, c *distributorChannels) {
 
 	// Create a 2D slice to store the world.
 	world := make([][]uint8, p.ImageHeight)
+
 	for i := range world {
 		world[i] = make([]uint8, p.ImageWidth)
-		for j := 0; j < p.ImageWidth; j++ {
-			// Read initial cell states from ioInput channel.
-			world[i][j] = <-c.ioInput
+	}
+
+	// Read the initial world state from the IO goroutine or randomly populate.
+	if random {
+		// Populate the grid with random alive (255) or dead (0) cells.
+		for i := 0; i < p.ImageHeight; i++ {
+			for j := 0; j < p.ImageWidth; j++ {
+				if rand.Float64() < 0.1 { // % chance for alive cell
+					world[i][j] = 255
+				} else {
+					world[i][j] = 0
+				}
+				<-c.ioInput // To stop blocking and allow keyPresses
+			}
+		}
+	} else {
+		// Read the grid state from the IO goroutine.
+		for i := 0; i < p.ImageHeight; i++ {
+			for j := 0; j < p.ImageWidth; j++ {
+				world[i][j] = <-c.ioInput // Read from the input channel
+			}
 		}
 	}
 
@@ -184,13 +204,12 @@ func distributor(p Params, c *distributorChannels) {
 					// RPC call to kill the server.
 					err = client.Call(stubs.KillServerHandler, empty, emptyResponse)
 					c.mu.Lock()
-					// StateChange event to indicate quitting and save a PGM image.
+					// StateChange event to indicate quitting.
 					c.events <- StateChange{r.turn, Quitting}
 					c.mu.Unlock()
-					savePGMImage(c, goWorld, p) // Function to save the current state as a PGM image.
-					close(c.events)             // Close the events channel.
-					done = true                 // Update boolean to know that channel is closed.
-					return                      // Exit goroutine.
+					close(c.events) // Close the events channel.
+					done = true     // Update boolean to know that channel is closed.
+					return          // Exit goroutine.
 
 				case 'p': // 'p' key is pressed.
 					// Pause the simulation.

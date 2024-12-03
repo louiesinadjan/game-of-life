@@ -1,3 +1,5 @@
+// File given by the university, commented by university
+
 package gol
 
 import (
@@ -29,9 +31,10 @@ type ioCommand uint8
 
 // This is a way of creating enums in Go.
 // It will evaluate to:
-//		ioOutput 	= 0
-//		ioInput 	= 1
-//		ioCheckIdle = 2
+//
+//	ioOutput 	= 0
+//	ioInput 	= 1
+//	ioCheckIdle = 2
 const (
 	ioOutput ioCommand = iota
 	ioInput
@@ -125,7 +128,7 @@ func (io *ioState) readPgmImage() {
 	fmt.Println("File", filename, "input done!")
 }
 
-// startIo should be the entrypoint of the io goroutine.
+// startIo is the entrypoint of the io goroutine.
 func startIo(p Params, c ioChannels) {
 	io := ioState{
 		params:   p,

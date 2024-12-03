@@ -2,6 +2,7 @@ package gol
 
 import (
 	"fmt"
+	"math/rand"
 	"time"
 	"uk.ac.bris.cs/gameoflife/util"
 )
@@ -44,20 +45,18 @@ func worker(id int, p Params, world [][]byte, result chan<- [][]byte, c distribu
 
 // savePGMImage function saves the current state of the world as a PGM image.
 func savePGMImage(c distributorChannels, world [][]byte, p Params) {
-	// Send the output command and filename to the IO goroutine.
 	c.ioCommand <- ioOutput
 	c.ioFilename <- fmt.Sprintf("%dx%dx%d", p.ImageWidth, p.ImageHeight, p.Turns)
-
-	// Send the world data to the IO goroutine.
+	// Iterate over the world and send each cell's value to the ioOutput channel for writing the PGM image.
 	for i := range world {
 		for j := range world[i] {
-			c.ioOutput <- world[i][j]
+			c.ioOutput <- world[i][j] // Send the current cell value to the output channel.
 		}
 	}
 }
 
 // distributor divides the work between workers and interacts with other goroutines.
-func distributor(p Params, c distributorChannels) {
+func distributor(p Params, c distributorChannels, random bool) {
 	// Signal the IO goroutine to start input operation.
 	c.ioCommand <- ioInput
 	c.ioFilename <- fmt.Sprintf("%d%s%d", p.ImageWidth, "x", p.ImageHeight)
@@ -70,10 +69,25 @@ func distributor(p Params, c distributorChannels) {
 		world[i] = make([]uint8, p.ImageWidth)
 	}
 
-	// Read the initial world state from the IO goroutine.
-	for i := 0; i < p.ImageHeight; i++ {
-		for j := 0; j < p.ImageWidth; j++ {
-			world[i][j] = <-c.ioInput
+	// Read the initial world state from the IO goroutine or randomly populate.
+	if random {
+		// Populate the grid with random alive (255) or dead (0) cells.
+		for i := 0; i < p.ImageHeight; i++ {
+			for j := 0; j < p.ImageWidth; j++ {
+				if rand.Float64() < 0.1 { // % chance for alive cell
+					world[i][j] = 255
+				} else {
+					world[i][j] = 0
+				}
+				<-c.ioInput // To stop blocking and allow keyPresses
+			}
+		}
+	} else {
+		// Read the grid state from the IO goroutine.
+		for i := 0; i < p.ImageHeight; i++ {
+			for j := 0; j < p.ImageWidth; j++ {
+				world[i][j] = <-c.ioInput // Read from the input channel
+			}
 		}
 	}
 
@@ -132,9 +146,8 @@ func distributor(p Params, c distributorChannels) {
 				c.events <- StateChange{turn, Executing}
 				savePGMImage(c, world, p)
 			case 'q':
-				// Save the current state and set the quit flag to exit.
+				// Set the quit flag to exit.
 				c.events <- StateChange{turn, Quitting}
-				savePGMImage(c, world, p)
 				quit = true
 				break
 			case 'p':

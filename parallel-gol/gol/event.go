@@ -1,3 +1,5 @@
+// File given by university, self-commented
+
 package gol
 
 import (
